@@ -68,23 +68,37 @@ async function query(sql, params) {
 const base = '/api';
 
 // 🔐 Login
+// 🔐 Login corregido
 app.post(`${base}/login`, async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const [user] = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
-    if (!user) return res.status(400).json({ message: 'Usuario no encontrado' });
-
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) return res.status(400).json({ message: 'Contraseña incorrecta' });
-
-    const token = jwt.sign({ id: user.id, nombre: user.nombre, email: user.email, rol: user.rol, nivel_id: user.nivel_id }, process.env.JWT_SECRET, { expiresIn: '8h' });
-
-    res.json({ token });
-  } catch (error) {
-    res.status(500).json({ message: 'Error en el servidor', error });
-  }
-});
-
+    const { email, password } = req.body;
+  
+    try {
+      const users = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
+      if (!users.length) return res.status(400).json({ message: 'Usuario no encontrado' });
+  
+      const user = users[0]; // ← tomamos el primer usuario de la consulta
+  
+      const validPassword = await bcrypt.compare(password, user.password);
+      if (!validPassword) return res.status(400).json({ message: 'Contraseña incorrecta' });
+  
+      const token = jwt.sign(
+        {
+          id: user.id,
+          nombre: user.nombre,
+          email: user.email,
+          rol: user.rol,
+          nivel_id: user.nivel_id,
+        },
+        process.env.JWT_SECRET || 'secret_key',
+        { expiresIn: '8h' }
+      );
+  
+      res.json({ token });
+    } catch (error) {
+      res.status(500).json({ message: 'Error en el servidor', error });
+    }
+  });
+  
 // 📧 Recuperar contraseña
 app.post(`${base}/forgot-password`, async (req, res) => {
   const { email } = req.body;
