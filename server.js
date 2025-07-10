@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -10,7 +9,15 @@ const nodemailer = require('nodemailer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración para Clever Cloud
+// ✅ Middleware CORS y JSON
+app.use(cors({
+  origin: '*', // Cambia por tu dominio si es necesario
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json());
+
+// 📦 Configuración de base de datos Clever Cloud
 const dbConfig = {
   host: process.env.MYSQL_ADDON_HOST || 'bx49uyepnlw7zovqoiy1-mysql.services.clever-cloud.com',
   user: process.env.MYSQL_ADDON_USER || 'u8fwbabmhaujhodp',
@@ -22,7 +29,9 @@ const dbConfig = {
   queueLimit: 0
 };
 
-// Configuración de correo
+const pool = mysql.createPool(dbConfig);
+
+// ✉️ Configuración de correo
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -31,16 +40,12 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Pool de conexiones a la base de datos
-const pool = mysql.createPool(dbConfig);
-
-// Middleware de autenticación
+// 🔐 Middleware de autenticación
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  
   if (!token) return res.sendStatus(401);
-  
+
   jwt.verify(token, process.env.JWT_SECRET || 'secret_key', (err, user) => {
     if (err) return res.sendStatus(403);
     req.user = user;
@@ -48,7 +53,7 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Función para ejecutar consultas SQL
+// 🔧 Función para ejecutar consultas SQL
 async function query(sql, params) {
   const connection = await pool.getConnection();
   try {
@@ -59,117 +64,14 @@ async function query(sql, params) {
   }
 }
 
-// Crear tablas (ejecutar solo una vez)
-async function createTables() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS niveles (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nombre VARCHAR(50) NOT NULL,
-        descripcion TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+// ✳️ (Opcional) Crear tablas
+// async function createTables() { ... } // Ya lo tienes en tu código, descomenta si lo usas
 
-    await query(`
-      CREATE TABLE IF NOT EXISTS grados (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nivel_id INT NOT NULL,
-        nombre VARCHAR(50) NOT NULL,
-        descripcion TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (nivel_id) REFERENCES niveles(id)
-      )
-    `);
+// ✅ RUTAS
 
-    await query(`
-      CREATE TABLE IF NOT EXISTS usuarios (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nombre VARCHAR(100) NOT NULL,
-        email VARCHAR(100) NOT NULL UNIQUE,
-        password VARCHAR(255) NOT NULL,
-        rol ENUM('profesor', 'coordinador', 'admin') NOT NULL,
-        nivel_id INT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (nivel_id) REFERENCES niveles(id)
-      )
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS alumnos (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nombre VARCHAR(100) NOT NULL,
-        grado_id INT NOT NULL,
-        email_tutor VARCHAR(100) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (grado_id) REFERENCES grados(id)
-      )
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS asistencias (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        fecha DATE NOT NULL,
-        grado_id INT NOT NULL,
-        profesor_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (grado_id) REFERENCES grados(id),
-        FOREIGN KEY (profesor_id) REFERENCES usuarios(id)
-      )
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS asistencia_detalle (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        asistencia_id INT NOT NULL,
-        alumno_id INT NOT NULL,
-        estado ENUM('presente', 'ausente', 'tarde') NOT NULL,
-        uniforme_completo BOOLEAN DEFAULT TRUE,
-        observaciones TEXT,
-        FOREIGN KEY (asistencia_id) REFERENCES asistencias(id),
-        FOREIGN KEY (alumno_id) REFERENCES alumnos(id)
-      )
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS reportes (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        tipo ENUM('uniforme', 'asistencia', 'general') NOT NULL,
-        alumno_id INT,
-        profesor_id INT NOT NULL,
-        detalle TEXT NOT NULL,
-        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (alumno_id) REFERENCES alumnos(id),
-        FOREIGN KEY (profesor_id) REFERENCES usuarios(id)
-      )
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS horarios (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        grado_id INT NOT NULL,
-        dia_semana ENUM('Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo') NOT NULL,
-        hora_inicio TIME NOT NULL,
-        hora_fin TIME NOT NULL,
-        FOREIGN KEY (grado_id) REFERENCES grados(id)
-      )
-    `);
-
-    console.log('Tablas creadas exitosamente');
-  } catch (error) {
-    console.error('Error al crear tablas:', error);
-  }
-}
-
-// Llamar a la función para crear tablas (descomentar solo la primera vez)
-// createTables();
-
-// RUTAS DE AUTENTICACIÓN
-// Registro (solo admin)
+// Registro (admin)
 app.post('/api/register', authenticateToken, async (req, res) => {
-  if (req.user.rol !== 'admin') {
-    return res.status(403).json({ message: 'No autorizado' });
-  }
+  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
 
   const { nombre, email, password, rol, nivel_id } = req.body;
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -219,22 +121,20 @@ app.post('/api/forgot-password', async (req, res) => {
     const resetToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '15m' });
     const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
 
-    const mailOptions = {
+    await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Recuperación de contraseña',
-      html: `<p>Haga clic <a href="${resetLink}">aquí</a> para restablecer su contraseña. Este enlace expirará en 15 minutos.</p>`
-    };
+      html: `<p>Haz clic <a href="${resetLink}">aquí</a> para restablecer tu contraseña (15 minutos).</p>`
+    });
 
-    await transporter.sendMail(mailOptions);
     res.json({ message: 'Correo de recuperación enviado' });
   } catch (error) {
     res.status(500).json({ message: 'Error al enviar correo', error });
   }
 });
 
-// RUTAS DE PROFESOR
-// Obtener grados por nivel del profesor
+// Profesor - Obtener grados
 app.get('/api/grados', authenticateToken, async (req, res) => {
   try {
     const grados = await query(
@@ -247,7 +147,7 @@ app.get('/api/grados', authenticateToken, async (req, res) => {
   }
 });
 
-// Obtener alumnos por grado
+// Obtener alumnos
 app.get('/api/alumnos/:grado_id', authenticateToken, async (req, res) => {
   try {
     const alumnos = await query('SELECT * FROM alumnos WHERE grado_id = ?', [req.params.grado_id]);
@@ -262,14 +162,12 @@ app.post('/api/asistencias', authenticateToken, async (req, res) => {
   const { grado_id, fecha, alumnos } = req.body;
 
   try {
-    // Crear registro de asistencia
     const [result] = await query(
       'INSERT INTO asistencias (fecha, grado_id, profesor_id) VALUES (?, ?, ?)',
       [fecha, grado_id, req.user.id]
     );
     const asistencia_id = result.insertId;
 
-    // Registrar detalle de asistencia para cada alumno
     for (const alumno of alumnos) {
       await query(
         'INSERT INTO asistencia_detalle (asistencia_id, alumno_id, estado, uniforme_completo, observaciones) VALUES (?, ?, ?, ?, ?)',
@@ -283,7 +181,7 @@ app.post('/api/asistencias', authenticateToken, async (req, res) => {
   }
 });
 
-// Enviar reporte
+// Reportes
 app.post('/api/reportes', authenticateToken, async (req, res) => {
   const { tipo, alumno_id, detalle } = req.body;
 
@@ -293,19 +191,14 @@ app.post('/api/reportes', authenticateToken, async (req, res) => {
       [tipo, alumno_id, req.user.id, detalle]
     );
 
-    // Si es un reporte de uniforme, enviar correo al tutor
     if (tipo === 'uniforme' && alumno_id) {
       const [alumno] = await query('SELECT * FROM alumnos WHERE id = ?', [alumno_id]);
-      const mailOptions = {
+      await transporter.sendMail({
         from: process.env.EMAIL_USER,
         to: alumno.email_tutor,
         subject: 'Reporte de uniforme escolar',
-        html: `<p>Estimado tutor de ${alumno.nombre},</p>
-               <p>Se ha registrado un reporte por incumplimiento del uniforme:</p>
-               <p>${detalle}</p>
-               <p>Por favor tomar las medidas correspondientes.</p>`
-      };
-      await transporter.sendMail(mailOptions);
+        html: `<p>Tutor de ${alumno.nombre},</p><p>${detalle}</p><p>Gracias.</p>`
+      });
     }
 
     res.status(201).json({ message: 'Reporte enviado exitosamente' });
@@ -314,10 +207,9 @@ app.post('/api/reportes', authenticateToken, async (req, res) => {
   }
 });
 
-// RUTAS DE COORDINADOR
-// Obtener estadísticas por nivel
+// Coordinador - estadísticas
 app.get('/api/estadisticas/niveles', authenticateToken, async (req, res) => {
-  if (req.user.rol !== 'coordinador' && req.user.rol !== 'admin') {
+  if (!['admin', 'coordinador'].includes(req.user.rol)) {
     return res.status(403).json({ message: 'No autorizado' });
   }
 
@@ -340,39 +232,25 @@ app.get('/api/estadisticas/niveles', authenticateToken, async (req, res) => {
   }
 });
 
-// RUTAS DE ADMINISTRADOR
-// Gestión de niveles
+// Admin - niveles y grados
 app.post('/api/niveles', authenticateToken, async (req, res) => {
-  if (req.user.rol !== 'admin') {
-    return res.status(403).json({ message: 'No autorizado' });
-  }
+  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
 
   const { nombre, descripcion } = req.body;
-
   try {
-    await query(
-      'INSERT INTO niveles (nombre, descripcion) VALUES (?, ?)',
-      [nombre, descripcion]
-    );
+    await query('INSERT INTO niveles (nombre, descripcion) VALUES (?, ?)', [nombre, descripcion]);
     res.status(201).json({ message: 'Nivel creado exitosamente' });
   } catch (error) {
     res.status(500).json({ message: 'Error al crear nivel', error });
   }
 });
 
-// Gestión de grados
 app.post('/api/grados', authenticateToken, async (req, res) => {
-  if (req.user.rol !== 'admin') {
-    return res.status(403).json({ message: 'No autorizado' });
-  }
+  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
 
   const { nivel_id, nombre, descripcion } = req.body;
-
   try {
-    await query(
-      'INSERT INTO grados (nivel_id, nombre, descripcion) VALUES (?, ?, ?)',
-      [nivel_id, nombre, descripcion]
-    );
+    await query('INSERT INTO grados (nivel_id, nombre, descripcion) VALUES (?, ?, ?)', [nivel_id, nombre, descripcion]);
     res.status(201).json({ message: 'Grado creado exitosamente' });
   } catch (error) {
     res.status(500).json({ message: 'Error al crear grado', error });
@@ -381,5 +259,5 @@ app.post('/api/grados', authenticateToken, async (req, res) => {
 
 // Iniciar servidor
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
 });
