@@ -1,3 +1,4 @@
+// ✅ server.js - Backend actualizado con rutas bajo /api
 require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
@@ -11,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Middleware CORS y JSON
 app.use(cors({
-  origin: '*', // Cambia por tu dominio si es necesario
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -19,16 +20,15 @@ app.use(express.json());
 
 // 📦 Configuración de base de datos Clever Cloud
 const dbConfig = {
-  host: process.env.MYSQL_ADDON_HOST || 'bx49uyepnlw7zovqoiy1-mysql.services.clever-cloud.com',
-  user: process.env.MYSQL_ADDON_USER || 'u8fwbabmhaujhodp',
-  password: process.env.MYSQL_ADDON_PASSWORD || 'WNRnvJLg0N11Lz5Uiffv',
-  database: process.env.MYSQL_ADDON_DB || 'bx49uyepnlw7zovqoiy1',
+  host: process.env.MYSQL_ADDON_HOST,
+  user: process.env.MYSQL_ADDON_USER,
+  password: process.env.MYSQL_ADDON_PASSWORD,
+  database: process.env.MYSQL_ADDON_DB,
   port: process.env.MYSQL_ADDON_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 };
-
 const pool = mysql.createPool(dbConfig);
 
 // ✉️ Configuración de correo
@@ -64,33 +64,12 @@ async function query(sql, params) {
   }
 }
 
-// ✳️ (Opcional) Crear tablas
-// async function createTables() { ... } // Ya lo tienes en tu código, descomenta si lo usas
+// ✅ Rutas
+const base = '/api';
 
-// ✅ RUTAS
-
-// Registro (admin)
-app.post('/api/register', authenticateToken, async (req, res) => {
-  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
-
-  const { nombre, email, password, rol, nivel_id } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  try {
-    await query(
-      'INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)',
-      [nombre, email, hashedPassword, rol, nivel_id]
-    );
-    res.status(201).json({ message: 'Usuario registrado exitosamente' });
-  } catch (error) {
-    res.status(400).json({ message: 'Error al registrar usuario', error });
-  }
-});
-
-// Login
-app.post('/api/login', async (req, res) => {
+// 🔐 Login
+app.post(`${base}/login`, async (req, res) => {
   const { email, password } = req.body;
-
   try {
     const [user] = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
     if (!user) return res.status(400).json({ message: 'Usuario no encontrado' });
@@ -98,11 +77,7 @@ app.post('/api/login', async (req, res) => {
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) return res.status(400).json({ message: 'Contraseña incorrecta' });
 
-    const token = jwt.sign(
-      { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol, nivel_id: user.nivel_id },
-      process.env.JWT_SECRET || 'secret_key',
-      { expiresIn: '8h' }
-    );
+    const token = jwt.sign({ id: user.id, nombre: user.nombre, email: user.email, rol: user.rol, nivel_id: user.nivel_id }, process.env.JWT_SECRET, { expiresIn: '8h' });
 
     res.json({ token });
   } catch (error) {
@@ -110,22 +85,21 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Recuperación de contraseña
-app.post('/api/forgot-password', async (req, res) => {
+// 📧 Recuperar contraseña
+app.post(`${base}/forgot-password`, async (req, res) => {
   const { email } = req.body;
-
   try {
     const [user] = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
     if (!user) return res.status(400).json({ message: 'Usuario no encontrado' });
 
-    const resetToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '15m' });
+    const resetToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '15m' });
     const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Recuperación de contraseña',
-      html: `<p>Haz clic <a href="${resetLink}">aquí</a> para restablecer tu contraseña (15 minutos).</p>`
+      html: `<p>Haz clic <a href="${resetLink}">aquí</a> para restablecer tu contraseña.</p>`
     });
 
     res.json({ message: 'Correo de recuperación enviado' });
@@ -134,21 +108,31 @@ app.post('/api/forgot-password', async (req, res) => {
   }
 });
 
-// Profesor - Obtener grados
-app.get('/api/grados', authenticateToken, async (req, res) => {
+// 👤 Registro de usuario (solo admin)
+app.post(`${base}/register`, authenticateToken, async (req, res) => {
+  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
+  const { nombre, email, password, rol, nivel_id } = req.body;
   try {
-    const grados = await query(
-      'SELECT g.* FROM grados g JOIN niveles n ON g.nivel_id = n.id WHERE n.id = ?',
-      [req.user.nivel_id]
-    );
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await query('INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)', [nombre, email, hashedPassword, rol, nivel_id]);
+    res.status(201).json({ message: 'Usuario registrado exitosamente' });
+  } catch (error) {
+    res.status(400).json({ message: 'Error al registrar usuario', error });
+  }
+});
+
+// 📚 Obtener grados del nivel asignado (profesor)
+app.get(`${base}/grados`, authenticateToken, async (req, res) => {
+  try {
+    const grados = await query('SELECT * FROM grados WHERE nivel_id = ?', [req.user.nivel_id]);
     res.json(grados);
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener grados', error });
   }
 });
 
-// Obtener alumnos
-app.get('/api/alumnos/:grado_id', authenticateToken, async (req, res) => {
+// 🎓 Obtener alumnos por grado
+app.get(`${base}/alumnos/:grado_id`, authenticateToken, async (req, res) => {
   try {
     const alumnos = await query('SELECT * FROM alumnos WHERE grado_id = ?', [req.params.grado_id]);
     res.json(alumnos);
@@ -157,65 +141,47 @@ app.get('/api/alumnos/:grado_id', authenticateToken, async (req, res) => {
   }
 });
 
-// Registrar asistencia
-app.post('/api/asistencias', authenticateToken, async (req, res) => {
+// ✅ Registrar asistencia
+app.post(`${base}/asistencias`, authenticateToken, async (req, res) => {
   const { grado_id, fecha, alumnos } = req.body;
-
   try {
-    const [result] = await query(
-      'INSERT INTO asistencias (fecha, grado_id, profesor_id) VALUES (?, ?, ?)',
-      [fecha, grado_id, req.user.id]
-    );
+    const [result] = await query('INSERT INTO asistencias (fecha, grado_id, profesor_id) VALUES (?, ?, ?)', [fecha, grado_id, req.user.id]);
     const asistencia_id = result.insertId;
-
     for (const alumno of alumnos) {
-      await query(
-        'INSERT INTO asistencia_detalle (asistencia_id, alumno_id, estado, uniforme_completo, observaciones) VALUES (?, ?, ?, ?, ?)',
-        [asistencia_id, alumno.id, alumno.estado, alumno.uniforme_completo, alumno.observaciones]
-      );
+      await query('INSERT INTO asistencia_detalle (asistencia_id, alumno_id, estado, uniforme_completo, observaciones) VALUES (?, ?, ?, ?, ?)', [asistencia_id, alumno.id, alumno.estado, alumno.uniforme_completo, alumno.observaciones]);
     }
-
     res.status(201).json({ message: 'Asistencia registrada exitosamente' });
   } catch (error) {
     res.status(500).json({ message: 'Error al registrar asistencia', error });
   }
 });
 
-// Reportes
-app.post('/api/reportes', authenticateToken, async (req, res) => {
+// 📝 Enviar reporte
+app.post(`${base}/reportes`, authenticateToken, async (req, res) => {
   const { tipo, alumno_id, detalle } = req.body;
-
   try {
-    await query(
-      'INSERT INTO reportes (tipo, alumno_id, profesor_id, detalle) VALUES (?, ?, ?, ?)',
-      [tipo, alumno_id, req.user.id, detalle]
-    );
-
+    await query('INSERT INTO reportes (tipo, alumno_id, profesor_id, detalle) VALUES (?, ?, ?, ?)', [tipo, alumno_id, req.user.id, detalle]);
     if (tipo === 'uniforme' && alumno_id) {
       const [alumno] = await query('SELECT * FROM alumnos WHERE id = ?', [alumno_id]);
       await transporter.sendMail({
         from: process.env.EMAIL_USER,
         to: alumno.email_tutor,
         subject: 'Reporte de uniforme escolar',
-        html: `<p>Tutor de ${alumno.nombre},</p><p>${detalle}</p><p>Gracias.</p>`
+        html: `<p>Tutor de ${alumno.nombre},</p><p>${detalle}</p>`
       });
     }
-
     res.status(201).json({ message: 'Reporte enviado exitosamente' });
   } catch (error) {
     res.status(500).json({ message: 'Error al enviar reporte', error });
   }
 });
 
-// Coordinador - estadísticas
-app.get('/api/estadisticas/niveles', authenticateToken, async (req, res) => {
-  if (!['admin', 'coordinador'].includes(req.user.rol)) {
-    return res.status(403).json({ message: 'No autorizado' });
-  }
-
+// 📊 Estadísticas por nivel (admin y coordinador)
+app.get(`${base}/estadisticas/niveles`, authenticateToken, async (req, res) => {
+  if (!['admin', 'coordinador'].includes(req.user.rol)) return res.status(403).json({ message: 'No autorizado' });
   try {
     const estadisticas = await query(`
-      SELECT n.id, n.nombre, 
+      SELECT n.id, n.nombre,
              COUNT(DISTINCT g.id) AS total_grados,
              COUNT(DISTINCT a.id) AS total_alumnos,
              AVG(CASE WHEN ad.estado = 'presente' THEN 1 ELSE 0 END) * 100 AS promedio_asistencia
@@ -232,10 +198,9 @@ app.get('/api/estadisticas/niveles', authenticateToken, async (req, res) => {
   }
 });
 
-// Admin - niveles y grados
-app.post('/api/niveles', authenticateToken, async (req, res) => {
+// ➕ Crear nivel y grado (solo admin)
+app.post(`${base}/niveles`, authenticateToken, async (req, res) => {
   if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
-
   const { nombre, descripcion } = req.body;
   try {
     await query('INSERT INTO niveles (nombre, descripcion) VALUES (?, ?)', [nombre, descripcion]);
@@ -245,9 +210,8 @@ app.post('/api/niveles', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/grados', authenticateToken, async (req, res) => {
+app.post(`${base}/grados`, authenticateToken, async (req, res) => {
   if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
-
   const { nivel_id, nombre, descripcion } = req.body;
   try {
     await query('INSERT INTO grados (nivel_id, nombre, descripcion) VALUES (?, ?, ?)', [nivel_id, nombre, descripcion]);
@@ -257,7 +221,7 @@ app.post('/api/grados', authenticateToken, async (req, res) => {
   }
 });
 
-// Iniciar servidor
+// 🔄 Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
 });
