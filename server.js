@@ -67,16 +67,22 @@ async function query(sql, params) {
 // ✅ Rutas
 const base = '/api';
 
-// 🔐 Login SIN ENCRIPTACIÓN
+// 🔐 Login (SIN bcrypt) con campo `correo`
 app.post(`${base}/login`, async (req, res) => {
   const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Faltan datos' });
+  }
+
   try {
-    const results = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
+    const results = await query('SELECT * FROM usuarios WHERE correo = ?', [email]);
     if (results.length === 0) {
       return res.status(400).json({ message: 'Usuario no encontrado' });
     }
 
     const user = results[0];
+
     if (password !== user.password) {
       return res.status(400).json({ message: 'Contraseña incorrecta' });
     }
@@ -85,7 +91,7 @@ app.post(`${base}/login`, async (req, res) => {
       {
         id: user.id,
         nombre: user.nombre,
-        email: user.email,
+        email: user.correo,
         rol: user.rol,
         nivel_id: user.nivel_id
       },
@@ -104,7 +110,7 @@ app.post(`${base}/login`, async (req, res) => {
 app.post(`${base}/forgot-password`, async (req, res) => {
   const { email } = req.body;
   try {
-    const results = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
+    const results = await query('SELECT * FROM usuarios WHERE correo = ?', [email]);
     if (results.length === 0) return res.status(400).json({ message: 'Usuario no encontrado' });
 
     const user = results[0];
@@ -130,7 +136,7 @@ app.post(`${base}/register`, authenticateToken, async (req, res) => {
   const { nombre, email, password, rol, nivel_id } = req.body;
   try {
     await query(
-      'INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO usuarios (nombre, correo, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)',
       [nombre, email, password, rol, nivel_id]
     );
     res.status(201).json({ message: 'Usuario registrado exitosamente' });
