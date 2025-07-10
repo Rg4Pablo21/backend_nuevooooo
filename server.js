@@ -68,18 +68,17 @@ async function query(sql, params) {
 const base = '/api';
 
 // 🔐 Login
-// 🔐 Login corregido
+// 🔐 Login SIN ENCRIPTACIÓN
 app.post(`${base}/login`, async (req, res) => {
     const { email, password } = req.body;
-  
     try {
-      const users = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
-      if (!users.length) return res.status(400).json({ message: 'Usuario no encontrado' });
+      const [user] = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
+      if (!user) return res.status(400).json({ message: 'Usuario no encontrado' });
   
-      const user = users[0]; // ← tomamos el primer usuario de la consulta
-  
-      const validPassword = await bcrypt.compare(password, user.password);
-      if (!validPassword) return res.status(400).json({ message: 'Contraseña incorrecta' });
+      // Comparación directa sin bcrypt
+      if (password !== user.password) {
+        return res.status(400).json({ message: 'Contraseña incorrecta' });
+      }
   
       const token = jwt.sign(
         {
@@ -87,7 +86,7 @@ app.post(`${base}/login`, async (req, res) => {
           nombre: user.nombre,
           email: user.email,
           rol: user.rol,
-          nivel_id: user.nivel_id,
+          nivel_id: user.nivel_id
         },
         process.env.JWT_SECRET || 'secret_key',
         { expiresIn: '8h' }
@@ -98,6 +97,7 @@ app.post(`${base}/login`, async (req, res) => {
       res.status(500).json({ message: 'Error en el servidor', error });
     }
   });
+  
   
 // 📧 Recuperar contraseña
 app.post(`${base}/forgot-password`, async (req, res) => {
@@ -122,18 +122,22 @@ app.post(`${base}/forgot-password`, async (req, res) => {
   }
 });
 
-// 👤 Registro de usuario (solo admin)
+// 👤 Registro de usuario SIN ENCRIPTAR
 app.post(`${base}/register`, authenticateToken, async (req, res) => {
-  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
-  const { nombre, email, password, rol, nivel_id } = req.body;
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    await query('INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)', [nombre, email, hashedPassword, rol, nivel_id]);
-    res.status(201).json({ message: 'Usuario registrado exitosamente' });
-  } catch (error) {
-    res.status(400).json({ message: 'Error al registrar usuario', error });
-  }
-});
+    if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
+    const { nombre, email, password, rol, nivel_id } = req.body;
+    try {
+      // Guardar la contraseña directamente (sin hash)
+      await query(
+        'INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)',
+        [nombre, email, password, rol, nivel_id]
+      );
+      res.status(201).json({ message: 'Usuario registrado exitosamente' });
+    } catch (error) {
+      res.status(400).json({ message: 'Error al registrar usuario', error });
+    }
+  });
+  
 
 // 📚 Obtener grados del nivel asignado (profesor)
 app.get(`${base}/grados`, authenticateToken, async (req, res) => {
