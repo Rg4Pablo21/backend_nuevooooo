@@ -67,45 +67,47 @@ async function query(sql, params) {
 // ✅ Rutas
 const base = '/api';
 
-// 🔐 Login
 // 🔐 Login SIN ENCRIPTACIÓN
 app.post(`${base}/login`, async (req, res) => {
-    const { email, password } = req.body;
-    try {
-      const [user] = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
-      if (!user) return res.status(400).json({ message: 'Usuario no encontrado' });
-  
-      // Comparación directa sin bcrypt
-      if (password !== user.password) {
-        return res.status(400).json({ message: 'Contraseña incorrecta' });
-      }
-  
-      const token = jwt.sign(
-        {
-          id: user.id,
-          nombre: user.nombre,
-          email: user.email,
-          rol: user.rol,
-          nivel_id: user.nivel_id
-        },
-        process.env.JWT_SECRET || 'secret_key',
-        { expiresIn: '8h' }
-      );
-  
-      res.json({ token });
-    } catch (error) {
-      res.status(500).json({ message: 'Error en el servidor', error });
+  const { email, password } = req.body;
+  try {
+    const results = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
+    if (results.length === 0) {
+      return res.status(400).json({ message: 'Usuario no encontrado' });
     }
-  });
-  
-  
+
+    const user = results[0];
+    if (password !== user.password) {
+      return res.status(400).json({ message: 'Contraseña incorrecta' });
+    }
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        nombre: user.nombre,
+        email: user.email,
+        rol: user.rol,
+        nivel_id: user.nivel_id
+      },
+      process.env.JWT_SECRET || 'secret_key',
+      { expiresIn: '8h' }
+    );
+
+    res.json({ token });
+  } catch (error) {
+    console.error('❌ Error al hacer login:', error);
+    res.status(500).json({ message: 'Error en el servidor', error });
+  }
+});
+
 // 📧 Recuperar contraseña
 app.post(`${base}/forgot-password`, async (req, res) => {
   const { email } = req.body;
   try {
-    const [user] = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
-    if (!user) return res.status(400).json({ message: 'Usuario no encontrado' });
+    const results = await query('SELECT * FROM usuarios WHERE email = ?', [email]);
+    if (results.length === 0) return res.status(400).json({ message: 'Usuario no encontrado' });
 
+    const user = results[0];
     const resetToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '15m' });
     const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
 
@@ -124,20 +126,18 @@ app.post(`${base}/forgot-password`, async (req, res) => {
 
 // 👤 Registro de usuario SIN ENCRIPTAR
 app.post(`${base}/register`, authenticateToken, async (req, res) => {
-    if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
-    const { nombre, email, password, rol, nivel_id } = req.body;
-    try {
-      // Guardar la contraseña directamente (sin hash)
-      await query(
-        'INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)',
-        [nombre, email, password, rol, nivel_id]
-      );
-      res.status(201).json({ message: 'Usuario registrado exitosamente' });
-    } catch (error) {
-      res.status(400).json({ message: 'Error al registrar usuario', error });
-    }
-  });
-  
+  if (req.user.rol !== 'admin') return res.status(403).json({ message: 'No autorizado' });
+  const { nombre, email, password, rol, nivel_id } = req.body;
+  try {
+    await query(
+      'INSERT INTO usuarios (nombre, email, password, rol, nivel_id) VALUES (?, ?, ?, ?, ?)',
+      [nombre, email, password, rol, nivel_id]
+    );
+    res.status(201).json({ message: 'Usuario registrado exitosamente' });
+  } catch (error) {
+    res.status(400).json({ message: 'Error al registrar usuario', error });
+  }
+});
 
 // 📚 Obtener grados del nivel asignado (profesor)
 app.get(`${base}/grados`, authenticateToken, async (req, res) => {
@@ -163,7 +163,7 @@ app.get(`${base}/alumnos/:grado_id`, authenticateToken, async (req, res) => {
 app.post(`${base}/asistencias`, authenticateToken, async (req, res) => {
   const { grado_id, fecha, alumnos } = req.body;
   try {
-    const [result] = await query('INSERT INTO asistencias (fecha, grado_id, profesor_id) VALUES (?, ?, ?)', [fecha, grado_id, req.user.id]);
+    const result = await query('INSERT INTO asistencias (fecha, grado_id, profesor_id) VALUES (?, ?, ?)', [fecha, grado_id, req.user.id]);
     const asistencia_id = result.insertId;
     for (const alumno of alumnos) {
       await query('INSERT INTO asistencia_detalle (asistencia_id, alumno_id, estado, uniforme_completo, observaciones) VALUES (?, ?, ?, ?, ?)', [asistencia_id, alumno.id, alumno.estado, alumno.uniforme_completo, alumno.observaciones]);
