@@ -1,0 +1,23 @@
+services:
+  - type: web          # Tipo de servicio (aplicación web)
+    name: sistema-escolar  # Nombre de tu aplicación en Render
+    runtime: node      # Entorno de ejecución (Node.js)
+    buildCommand: npm install  # Comando para instalar dependencias
+    startCommand: node server.js  # Comando para iniciar el servidor
+    envVars:          # Variables de entorno (equivalentes a .env pero en Render)
+      - key: MYSQL_ADDON_HOST
+        value: bx49uyepnlw7zovqoiy1-mysql.services.clever-cloud.com  # Host de Clever Cloud
+      - key: MYSQL_ADDON_DB
+        value: bx49uyepnlw7zovqoiy1  # Nombre de la BD en Clever Cloud
+      - key: MYSQL_ADDON_USER
+        value: u8fwbabmhaujhodp      # Usuario de la BD
+      - key: MYSQL_ADDON_PORT
+        value: 3306                  # Puerto de MySQL
+      - key: MYSQL_ADDON_PASSWORD
+        value: WNRnvJLg0N11Lz5Uiffv  # Contraseña de la BD
+      - key: JWT_SECRET
+        generateValue: true          # Render generará automáticamente un secreto para JWT
+      - key: EMAIL_USER
+        value: pagiron@scl.edu.gt  # Correo para enviar emails (usar uno real)
+      - key: EMAIL_PASS
+        value: 123  # Contraseña de aplicación del correo (no la personal)
